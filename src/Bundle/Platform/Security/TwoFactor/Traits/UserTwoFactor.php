@@ -19,11 +19,13 @@ use LogicException;
 use Scheb\TwoFactorBundle\Model\Totp\TotpConfiguration;
 use Scheb\TwoFactorBundle\Model\Totp\TotpConfigurationInterface;
 use function array_search;
+use function array_splice;
 use function in_array;
 
 trait UserTwoFactor
 {
-    #[ORM\Column(name: 'totp_secret', type: Types::STRING, length: 45, nullable: true)]
+    // scheb/2fa-totp generates a 52-character secret (32 random bytes in Base32)
+    #[ORM\Column(name: 'totp_secret', type: Types::STRING, length: 64, nullable: true)]
     private ?string $totpSecret = null;
 
     #[ORM\Column(name: 'auth_code', type: Types::STRING, length: 45, nullable: true)]
@@ -37,6 +39,9 @@ trait UserTwoFactor
     ])]
     private int $trustedVersion = 0;
 
+    /**
+     * @var list<string>|null
+     */
     #[ORM\Column(name: 'backup_codes', type: 'json', nullable: true)]
     private ?array $backupCodes = [];
 
@@ -60,7 +65,10 @@ trait UserTwoFactor
 
     public function getTotpAuthenticationConfiguration(): TotpConfigurationInterface | null
     {
-        $period = 20;
+        // Google Authenticator and Microsoft Authenticator ignore the period in the
+        // provisioning URI and always use 30 seconds, so any other value yields codes
+        // that never match.
+        $period = 30;
         $digits = 6;
 
         return $this->totpSecret !== null ? new TotpConfiguration($this->totpSecret, TotpConfiguration::ALGORITHM_SHA1, $period, $digits) : null;
@@ -97,7 +105,7 @@ trait UserTwoFactor
             return true;
         }
 
-        return (bool) $this->isEmailAuthEnabled();
+        return $this->isEmailAuthEnabled();
     }
 
     public function getTrustedTokenVersion(): int
@@ -112,9 +120,11 @@ trait UserTwoFactor
 
     public function invalidateBackupCode(string $code): void
     {
-        $key = array_search($code, (array) $this->backupCodes, true);
+        $codes = $this->getBackUpCodes();
+        $key = array_search($code, $codes, true);
         if ($key !== false) {
-            unset($this->backupCodes[$key]);
+            array_splice($codes, $key, 1);
+            $this->backupCodes = $codes;
         }
     }
 
