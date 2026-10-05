@@ -26,6 +26,7 @@ use SolidWorx\Platform\SaasBundle\Repository\PlanFeatureRepositoryInterface;
 use SolidWorx\Platform\SaasBundle\Subscription\SubscriptionProviderInterface;
 use Symfony\Contracts\Cache\CacheInterface;
 use Symfony\Contracts\Service\ResetInterface;
+use function array_keys;
 use function get_debug_type;
 use function is_array;
 use function is_bool;
@@ -50,10 +51,8 @@ readonly class PlanFeatureManager implements ResetInterface
      */
     public function getFeature(Plan $plan, string $featureKey): FeatureValue
     {
-        $cacheKey = sprintf('feature_%s_%s', $plan->getId()->toBase58(), $featureKey);
-
         try {
-            return $this->cache->get($cacheKey, function () use ($plan, $featureKey): FeatureValue {
+            return $this->cache->get($this->cacheKey($plan, $featureKey), function () use ($plan, $featureKey): FeatureValue {
                 if (! $this->configRegistry->has($featureKey)) {
                     throw new UndefinedFeatureException($featureKey);
                 }
@@ -266,12 +265,24 @@ readonly class PlanFeatureManager implements ResetInterface
         $this->cache->clear();
     }
 
+    /**
+     * Forgets every right of the plan. A cache has no wildcard, so each key of
+     * the catalogue is dropped by name; deleting "feature_<plan>_*" removed a
+     * key that never existed, and a changed right kept its old value.
+     */
     private function invalidateCache(Plan $plan): void
     {
-        try {
-            $this->cache->delete(sprintf('feature_%s_', $plan->getId()->toBase58()) . '*');
-        } catch (\Psr\Cache\InvalidArgumentException) {
+        foreach (array_keys($this->configRegistry->all()) as $featureKey) {
+            try {
+                $this->cache->delete($this->cacheKey($plan, $featureKey));
+            } catch (\Psr\Cache\InvalidArgumentException) {
+            }
         }
+    }
+
+    private function cacheKey(Plan $plan, string $featureKey): string
+    {
+        return sprintf('feature_%s_%s', $plan->getId()->toBase58(), $featureKey);
     }
 
     private function validateValueType(FeatureType $type, mixed $value): void
