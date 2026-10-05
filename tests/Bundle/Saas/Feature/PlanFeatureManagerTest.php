@@ -202,6 +202,22 @@ final class PlanFeatureManagerTest extends TestCase
         self::assertSame(10, $value->value);
     }
 
+    /**
+     * A right read once is cached: changing it must not leave the old value.
+     */
+    public function testAChangedRightIsReadBackChanged(): void
+    {
+        $manager = $this->createManager();
+
+        self::assertSame(10, $manager->getFeature($this->plan, 'max_users')->asInt());
+
+        $manager->setFeature($this->plan, 'max_users', 25);
+        self::assertSame(25, $manager->getFeature($this->plan, 'max_users')->asInt());
+
+        $manager->removeFeature($this->plan, 'max_users');
+        self::assertSame(10, $manager->getFeature($this->plan, 'max_users')->asInt());
+    }
+
     public function testGetConfigDefaultThrowsForUnknownKey(): void
     {
         $manager = $this->createManager();
@@ -221,8 +237,20 @@ final class PlanFeatureManagerTest extends TestCase
              * @param array<PlanFeature> $planFeatures
              */
             public function __construct(
-                private readonly array $planFeatures,
+                private array $planFeatures,
             ) {
+            }
+
+            public function save(PlanFeature $planFeature): void
+            {
+                if (! in_array($planFeature, $this->planFeatures, true)) {
+                    $this->planFeatures[] = $planFeature;
+                }
+            }
+
+            public function remove(PlanFeature $planFeature): void
+            {
+                $this->planFeatures = array_values(array_filter($this->planFeatures, static fn (PlanFeature $f): bool => $f !== $planFeature));
             }
 
             public function findByPlan(Plan $plan): array
@@ -243,7 +271,7 @@ final class PlanFeatureManagerTest extends TestCase
 
             public function findByPlans(array $plans): array
             {
-                return $this->planFeatures;
+                return array_values($this->planFeatures);
             }
 
             /**
